@@ -8,20 +8,18 @@ static const char *example_str = "[example]	\n"		\
 
 int main(void)
 {
-	char *line;
-	struct ini__io io = {0};
-	FILE *fp = fopen("example.ini", "r");
+	ini_t ini = ini_parse_from_path("example.ini");
 
-	if (!fp) return -1;
+	if (ini) {
+		puts(ini_get(ini, "owner", "name", "noname"));
+		puts(ini_get(ini, "owner", "organization", "none"));
 
-	ini__io_file(&io, fp, INI__IO_READ);
-
-	while (line = ini__io_line(&io)) {
-		puts(line);
-		free(line);
+		puts(ini_get(ini, "database", "server", "0.0.0.0"));
+		puts(ini_get(ini, "database", "port", "127"));
+		puts(ini_get(ini, "database", "file", "null.dat"));
+		ini_free(ini);
 	}
-	
-	fclose(fp);
+
 	return 0;
 }
 

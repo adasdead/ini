@@ -27,6 +27,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #ifdef __cplusplus
 namespace ini
@@ -37,6 +38,7 @@ extern "C" {
 #define INI_DEF					static
 #define INI_MAP_START_CAPACITY			16
 #define INI_DEF_SECTION_NAME			"DEFAULT"
+#define INI_IO_PEEK				'\0'
 #define INI_IO_EOF				EOF
 
 #define ini__strdup(str)					\
@@ -48,11 +50,16 @@ extern "C" {
 #define ini__map_keys_equal(hash1, key1, hash2, key2)		\
 	((hash1 == hash2) && (strcmp(key1, key2) == 0))
 
+#define ini__is_comment(ch)					\
+	((ch) == ';' || (ch) == '#')
+
+#define ini__is_delim(ch)					\
+	((ch) == ':' || (ch) == '=')
+
 typedef unsigned long				ini__hash_t;
 typedef enum ini_bool				ini_bool_t;
 
 typedef struct ini__map				*ini_t;
-typedef struct ini__map				*ini_section_t;
 
 typedef void (*ini__map_free_value_fn)(void *ptr);
 
@@ -85,6 +92,12 @@ struct ini__io {
 	int (*getc)(struct ini__io*);
 	void (*putc)(struct ini__io*, int);
 	ini_bool_t (*eof)(struct ini__io*);
+};
+
+struct ini__parse_state {
+	struct ini__io				*io;
+	struct ini__map				*cur_section;
+	ini_t					ini;
 };
 
 INI_DEF char *ini__strndup(const char *str, size_t size)
@@ -177,7 +190,7 @@ INI_DEF void ini__map_expand(struct ini__map *map)
 			}
 		}
 
-		free(map->values);
+		free(map->values); /* it's not leak */
 
 		map->capacity = new_capacity;
 		map->values = new_values;
@@ -190,7 +203,7 @@ INI_DEF ini_bool_t ini__map_put(struct ini__map *map, const char *key,
 	struct ini__map_entry **p, *cur;
 	ini__hash_t hash;
 
-	if (map && key && value) {
+	if (map && key) {
 		hash = ini__hash(key);
 
 		p = &(map->values[ini__map_index(hash, map->capacity)]);
@@ -198,7 +211,7 @@ INI_DEF ini_bool_t ini__map_put(struct ini__map *map, const char *key,
 		while (p != NULL) {
 			if ((cur = *p) == NULL) {
 				*p = ini__map_entry_new(hash, key, value);
-				if (*p == NULL) break;
+				if (*p == NULL) break; /* it's not leak */
 				map->size++;
 
 				ini__map_expand(map);
@@ -319,7 +332,10 @@ INI_DEF void ini__map_free(struct ini__map *map)
 		for (i = 0; i < size; i++) {
 			cur = entries[i];
 
-			map->free(cur->value);
+			if (cur->value) {
+				map->free(cur->value);
+			}
+
 			free(cur->key);
 			free(cur);
 		}
@@ -407,7 +423,7 @@ INI_DEF void ini__io_string(struct ini__io *io, const char *str)
 	if (io) {
 		io->raw = (void*) str;
 		io->type = INI__IO_READ;
-		io->peek = ' ';
+		io->peek = INI_IO_PEEK;
 
 		io->getc = ini__io_string_getc;
 		io->eof = ini__io_string_eof;
@@ -442,7 +458,7 @@ INI_DEF void ini__io_file(struct ini__io *io, FILE *fp,
 	if (io) {
 		io->raw = (void*) fp;
 		io->type = type;
-		io->peek = ' ';
+		io->peek = INI_IO_PEEK;
 
 		if (type == INI__IO_READ) {
 			io->getc = ini__io_file_getc;
@@ -456,13 +472,16 @@ INI_DEF void ini__io_file(struct ini__io *io, FILE *fp,
 
 INI_DEF char *ini__io_line(struct ini__io *io)
 {
+	/* TODO: */
 	size_t size = 1;
 	char *buffer = NULL;
 	char *block;
 
 	if (io && io->type == INI__IO_READ) {
 		while (!io->eof(io)) {
-			if (io->getc(io) == '\n') break;
+			if (io->getc(io) == '\n' || io->peek == INI_IO_EOF) {
+				break;
+			}
 
 			block = (char*) realloc(buffer, ++size);
 
@@ -480,6 +499,197 @@ INI_DEF char *ini__io_line(struct ini__io *io)
 	}
 
 	return buffer;
+}
+
+/*				PARSE				*/
+
+INI_DEF size_t ini__parse_line_in_quotes(const char *line)
+{
+	size_t index = 0;
+
+	if (line && *line == '"') {
+		while (*line++) {
+			if (*line == '\0') {
+				index = 0;
+				break;
+			}
+
+			if (*line == '"') break;
+
+			index++;
+		}
+	}
+
+	return index;
+}
+
+INI_DEF void ini__parse_line_remove_comment(char *line)
+{
+	ini_bool_t is_quoted = ini_false;
+
+	do {
+		if (*line == '"') {
+			is_quoted = ini__parse_line_in_quotes(line);
+			continue;
+		}
+
+		if (!is_quoted && ini__is_comment(*line)) {
+			*line = '\0';
+			break;
+		}
+
+	} while (*line++);
+}
+
+INI_DEF void ini__parse_line_trim(char **line)
+{
+	size_t len;
+	char *p = *line;
+
+	if (line && p) {
+		len = strlen(p);
+
+		while (isspace(p[len - 1])) --len;
+		while (*p && isspace(*p)) ++p, --len;
+
+		p = ini__strndup(p, len);
+		free(*line);
+		*line = p;
+	}
+}
+
+INI_DEF ini_bool_t ini__parse_line_section(struct ini__parse_state *state,
+						const char *line)
+{
+	/* TODO: */
+	char *section_name;
+	struct ini__map *section;
+
+	if (line && *line == '[') {
+		section_name = strdup(line);
+
+		if (section_name) {
+			sscanf(section_name, "[%[^]]", line);
+			free(section_name);
+			section = ini__map_new(free);
+			ini__map_put(state->ini, line, section);
+			state->cur_section = section;
+			return ini_true;
+		}
+	}
+
+	return ini_false;
+}
+
+INI_DEF void ini__parse_line_split(const char *line, char **key,
+						char **value)
+{
+	/* TODO: */
+	ini_bool_t delim_found = ini_false;
+	size_t delim_pos = 0;
+	char *_value, *_key;
+
+	if (line) {
+		while (*(line + delim_pos) != '\0') {
+			if (ini__is_delim(*(line + delim_pos))) {
+				delim_found = ini_true;
+				break;
+			}
+
+			delim_pos++;
+		}
+
+		if (delim_found) {
+			_key = strndup(line, delim_pos);
+			_value = strdup(line + delim_pos + 1);
+			
+			ini__parse_line_trim(&_key);
+			ini__parse_line_trim(&_value);
+			
+			*key = _key;
+
+			if (*(*value = _value) == '\0') {
+				free(_value);
+				*value = NULL;
+			}
+			else {
+				sscanf(_value, "\"%[^\"]\"", *value);
+			}
+		}
+		else {
+			*key = strdup(line);
+			*value = NULL;
+		}
+	}
+
+}
+
+INI_DEF ini_t ini__parse(struct ini__parse_state *state)
+{
+	char *line, *key, *value;
+
+	while (line = ini__io_line(state->io)) {
+		ini__parse_line_remove_comment(line);
+		ini__parse_line_trim(&line);
+
+		if (line) {
+			if (ini__parse_line_section(state, line)) {
+				free(line);
+				continue;
+			}
+
+			ini__parse_line_split(line, &key, &value);
+			ini__map_put(state->cur_section, key, (void*) value);
+			free(key);
+		}
+
+		free(line);
+	}
+
+	return state->ini;
+}
+
+INI_DEF ini_t ini__parse_io(struct ini__io *io)
+{
+	struct ini__parse_state state = {0};
+
+	if (!io) return NULL;
+
+	state.cur_section = ini__map_new(free);
+	state.ini = ini_new();
+	state.io = io;
+
+	ini__map_put(state.ini, INI_DEF_SECTION_NAME,
+				state.cur_section);
+	
+	return ini__parse(&state);
+}
+
+INI_DEF ini_t ini_parse_from_str(const char *str)
+{
+	struct ini__io io = {0};
+	ini__io_string(&io, str);
+	return ini__parse_io(&io);
+}
+
+INI_DEF ini_t ini_parse_from_file(FILE *fp)
+{
+	struct ini__io io = {0};
+	ini__io_file(&io, fp, INI__IO_READ);
+	return ini__parse_io(&io);
+}
+
+INI_DEF ini_t ini_parse_from_path(const char *path)
+{
+	FILE *fp;
+	ini_t tmp = NULL;
+
+	if ((fp = fopen(path, "r")) != NULL) {
+		tmp = ini_parse_from_file(fp);
+		fclose(fp);
+	}
+
+	return tmp;
 }
 
 #ifdef __cplusplus

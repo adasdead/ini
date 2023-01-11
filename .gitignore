@@ -1,5 +1,6 @@
 # cmake / vscode
 build/
+.vscode/
 
 # Prerequisites
 *.d
