@@ -309,7 +309,6 @@ INI_DEF size_t ini__map_enumerate(struct ini__map *map,
 					size--;
 					break;
 				}
-				
 			}
 		}
 	}
@@ -469,7 +468,7 @@ INI_DEF void ini__io_file(struct ini__io *io, FILE *fp,
 	}
 }
 
-INI_DEF char *ini__io_line(struct ini__io *io)
+INI_DEF char *ini__io_read_line(struct ini__io *io)
 {
 	size_t size = 1;
 	char *buffer = NULL;
@@ -497,6 +496,17 @@ INI_DEF char *ini__io_line(struct ini__io *io)
 	}
 
 	return buffer;
+}
+
+INI_DEF void ini__io_write_line(struct ini__io *io, const char *line)
+{
+	if (line && io && io->type == INI__IO_WRITE) {
+		while (*line != '\0') {
+			io->putc(io, *line++);
+		}
+		
+		io->putc(io, '\n');
+	}
 }
 
 /*				PARSE				*/
@@ -607,8 +617,8 @@ INI_DEF void ini__parse_line_split(const char *line, char **key,
 		}
 
 		if (delim_found) {
-			_key = strndup(line, delim_pos);
-			_value = strdup(line + delim_pos + 1);
+			_key = ini__strndup(line, delim_pos);
+			_value = ini__strdup(line + delim_pos + 1);
 			
 			ini__parse_line_trim(&_key);
 			ini__parse_line_trim(&_value);
@@ -644,7 +654,7 @@ INI_DEF ini_t ini__parse(struct ini__io *io)
 	ini__map_put(state.ini, INI_DEF_SECTION_NAME, state.cur_section);
 
 	while (!io->eof(io)) {
-		line = ini__io_line(io);
+		line = ini__io_read_line(io);
 		ini__parse_line_remove_comment(line);
 		ini__parse_line_trim(&line);
 
@@ -655,7 +665,15 @@ INI_DEF ini_t ini__parse(struct ini__io *io)
 			}
 
 			ini__parse_line_split(line, &key, &value);
-			ini__map_put(state.cur_section, key, (void*) value);
+
+			if (*key) {
+				ini__map_put(state.cur_section, key,
+							(void*) value);
+			}
+			else {
+				free(value);
+			}
+
 			free(key);
 		}
 
@@ -690,6 +708,104 @@ INI_DEF ini_t ini_parse_from_path(const char *path)
 	}
 
 	return tmp;
+}
+
+/*				STORE				*/
+
+INI_DEF size_t ini__store_section(struct ini__map *sec,
+					struct ini__io *io)
+{
+	struct ini__map_entry **entries, *cur;
+	size_t size, tmp_size = 0;
+	const char *_value;
+	char *tmp;
+	int i;
+
+	if (sec && io && io->type == INI__IO_WRITE) {
+		size = ini__map_enumerate(sec, &entries);
+
+		for (i = 0; i < size; i++) {
+			cur = entries[i];
+
+			if (!*cur->key) continue; 
+
+			_value = (const char *) cur->value;
+			_value = (_value) ? _value : "";
+
+			tmp_size = strlen(cur->key) + 4 + strlen(_value);
+			tmp = ini__strndup("", tmp_size);
+
+			sprintf(tmp, "%s = %s", cur->key, _value);
+
+			ini__io_write_line(io, tmp);
+			
+			free(tmp);
+		}
+
+		free(entries);
+	}
+
+	return size;
+}
+
+INI_DEF void ini__store(ini_t ini, struct ini__io *io)
+{
+	struct ini__map_entry **entries, *cur;
+	struct ini__map *_value;
+	size_t size;
+	char *tmp;
+	int i;
+
+	if (ini && io && io->type == INI__IO_WRITE) {
+		size = ini__map_enumerate(ini, &entries);
+
+		_value = (struct ini__map*) ini__map_get(ini,
+					INI_DEF_SECTION_NAME);
+
+		if (_value) {
+			if (ini__store_section(_value, io))
+				io->putc(io, '\n');
+		}
+
+		for (i = 0; i < size; i++) {
+			cur = entries[i];
+
+			_value = (struct ini__map*) cur->value;
+
+			if (strcmp(cur->key, INI_DEF_SECTION_NAME) == 0) {
+				continue;
+			}
+
+			tmp = ini__strndup("", strlen(cur->key) + 3);
+
+			sprintf(tmp, "[%s]", cur->key);
+
+			ini__io_write_line(io, tmp);
+			ini__store_section(_value, io);
+			io->putc(io, '\n');
+			
+			free(tmp);
+		}
+
+		free(entries);
+	}
+}
+
+INI_DEF void ini_store_to_file(ini_t ini, FILE *fp)
+{
+	struct ini__io io = {0};
+	ini__io_file(&io, fp, INI__IO_WRITE);
+	ini__store(ini, &io);
+}
+
+INI_DEF void ini_store_to_path(ini_t ini, const char *path)
+{
+	FILE *fp;
+
+	if ((fp = fopen(path, "w")) != NULL) {
+		ini_store_to_file(ini, fp);
+		fclose(fp);
+	}
 }
 
 #ifdef __cplusplus
