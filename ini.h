@@ -95,7 +95,6 @@ struct ini__io {
 };
 
 struct ini__parse_state {
-	struct ini__io				*io;
 	struct ini__map				*cur_section;
 	ini_t					ini;
 };
@@ -472,7 +471,6 @@ INI_DEF void ini__io_file(struct ini__io *io, FILE *fp,
 
 INI_DEF char *ini__io_line(struct ini__io *io)
 {
-	/* TODO: */
 	size_t size = 1;
 	char *buffer = NULL;
 	char *block;
@@ -527,6 +525,8 @@ INI_DEF void ini__parse_line_remove_comment(char *line)
 {
 	ini_bool_t is_quoted = ini_false;
 
+	if (!line) return;
+
 	do {
 		if (*line == '"') {
 			is_quoted = ini__parse_line_in_quotes(line);
@@ -561,19 +561,27 @@ INI_DEF void ini__parse_line_trim(char **line)
 INI_DEF ini_bool_t ini__parse_line_section(struct ini__parse_state *state,
 						const char *line)
 {
-	/* TODO: */
-	char *section_name;
 	struct ini__map *section;
+	char *section_name;
 
 	if (line && *line == '[') {
 		section_name = strdup(line);
 
 		if (section_name) {
-			sscanf(section_name, "[%[^]]", line);
-			free(section_name);
-			section = ini__map_new(free);
-			ini__map_put(state->ini, line, section);
+			sscanf(line, "[%[^]]", section_name);
+
+			section = (struct ini__map*) ini__map_get(state->ini,
+								section_name);
+
+			if (!section) {
+				section = ini__map_new(free);
+				ini__map_put(state->ini, section_name,
+							section);
+			}
+
 			state->cur_section = section;
+
+			free(section_name);
 			return ini_true;
 		}
 	}
@@ -584,9 +592,8 @@ INI_DEF ini_bool_t ini__parse_line_section(struct ini__parse_state *state,
 INI_DEF void ini__parse_line_split(const char *line, char **key,
 						char **value)
 {
-	/* TODO: */
-	ini_bool_t delim_found = ini_false;
 	size_t delim_pos = 0;
+	ini_bool_t delim_found = ini_false;
 	char *_value, *_key;
 
 	if (line) {
@@ -624,59 +631,52 @@ INI_DEF void ini__parse_line_split(const char *line, char **key,
 
 }
 
-INI_DEF ini_t ini__parse(struct ini__parse_state *state)
+INI_DEF ini_t ini__parse(struct ini__io *io)
 {
 	char *line, *key, *value;
-
-	while (line = ini__io_line(state->io)) {
-		ini__parse_line_remove_comment(line);
-		ini__parse_line_trim(&line);
-
-		if (line) {
-			if (ini__parse_line_section(state, line)) {
-				free(line);
-				continue;
-			}
-
-			ini__parse_line_split(line, &key, &value);
-			ini__map_put(state->cur_section, key, (void*) value);
-			free(key);
-		}
-
-		free(line);
-	}
-
-	return state->ini;
-}
-
-INI_DEF ini_t ini__parse_io(struct ini__io *io)
-{
 	struct ini__parse_state state = {0};
 
 	if (!io) return NULL;
 
 	state.cur_section = ini__map_new(free);
 	state.ini = ini_new();
-	state.io = io;
 
-	ini__map_put(state.ini, INI_DEF_SECTION_NAME,
-				state.cur_section);
-	
-	return ini__parse(&state);
+	ini__map_put(state.ini, INI_DEF_SECTION_NAME, state.cur_section);
+
+	while (!io->eof(io)) {
+		line = ini__io_line(io);
+		ini__parse_line_remove_comment(line);
+		ini__parse_line_trim(&line);
+
+		if (line) {
+			if (ini__parse_line_section(&state, line)) {
+				free(line);
+				continue;
+			}
+
+			ini__parse_line_split(line, &key, &value);
+			ini__map_put(state.cur_section, key, (void*) value);
+			free(key);
+		}
+
+		free(line);
+	}
+
+	return state.ini;
 }
 
 INI_DEF ini_t ini_parse_from_str(const char *str)
 {
 	struct ini__io io = {0};
 	ini__io_string(&io, str);
-	return ini__parse_io(&io);
+	return ini__parse(&io);
 }
 
 INI_DEF ini_t ini_parse_from_file(FILE *fp)
 {
 	struct ini__io io = {0};
 	ini__io_file(&io, fp, INI__IO_READ);
-	return ini__parse_io(&io);
+	return ini__parse(&io);
 }
 
 INI_DEF ini_t ini_parse_from_path(const char *path)
