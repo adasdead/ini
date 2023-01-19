@@ -103,7 +103,7 @@ INI_DEF char *ini__strndup(const char *str, size_t size)
 {
 	char *tmp = NULL;
 
-	if (str) {
+	if (str != NULL) {
 		if (tmp = (char*) calloc(size + 1, sizeof *tmp)) {
 			strncpy(tmp, str, size);
 		}
@@ -118,7 +118,7 @@ INI_DEF ini__hash_t ini__hash(const char *value)
 	unsigned char ch;
 	unsigned int hash = 5381;
 
-	if (value) {
+	if (value != NULL) {
 		while ((ch = *value++) != '\0') {
 			hash = ((hash << 5) + hash) + ch;
 		}
@@ -171,7 +171,7 @@ INI_DEF void ini__map_expand(struct ini__map *map)
 	struct ini__map_entry *entry, *next;
 	int i;
 
-	if (map && map->size >= map->capacity) {
+	if (map != NULL && map->size >= map->capacity) {
 		new_capacity = map->capacity << 1;
 		new_values = calloc(new_capacity, sizeof *new_values);
 
@@ -189,7 +189,7 @@ INI_DEF void ini__map_expand(struct ini__map *map)
 			}
 		}
 
-		free(map->values); /* it's not leak */
+		free(map->values);
 
 		map->capacity = new_capacity;
 		map->values = new_values;
@@ -202,7 +202,7 @@ INI_DEF ini_bool_t ini__map_put(struct ini__map *map, const char *key,
 	struct ini__map_entry **p, *cur;
 	ini__hash_t hash;
 
-	if (map && key) {
+	if (map != NULL && key != NULL) {
 		hash = ini__hash(key);
 
 		p = &(map->values[ini__map_index(hash, map->capacity)]);
@@ -238,11 +238,11 @@ INI_DEF void *ini__map_get(struct ini__map *map, const char *key)
 	void *value = NULL;
 	ini__hash_t hash;
 
-	if (map && key) {
+	if (map != NULL && key != NULL) {
 		hash = ini__hash(key);
 		entry = map->values[ini__map_index(hash, map->capacity)];
 
-		while (entry) {
+		while (entry != NULL) {
 			if (ini__map_keys_equal(entry->hash, entry->key,
 							hash, key)) {
 				return entry->value;
@@ -262,7 +262,7 @@ INI_DEF ini_bool_t ini__map_remove(struct ini__map *map, const char *key)
 	struct ini__map_entry **p, *cur;
 	ini__hash_t hash;
 
-	if (map && key) {
+	if (map != NULL && key != NULL) {
 		hash = ini__hash(key);
 
 		p = &(map->values[ini__map_index(hash, map->capacity)]);
@@ -293,7 +293,7 @@ INI_DEF size_t ini__map_enumerate(struct ini__map *map,
 	size_t size = 0;
 	int i;
 
-	if (map && map->values) {
+	if (map != NULL && map->values) {
 		for (i = 0; i < map->capacity; i++) {
 			next = map->values[i];
 
@@ -301,7 +301,7 @@ INI_DEF size_t ini__map_enumerate(struct ini__map *map,
 				next = entry->next;
 				tmp = realloc(block, ++size * sizeof *tmp);
 
-				if (tmp) {
+				if (tmp != NULL) {
 					block = tmp;
 					block[size - 1] = entry;
 				}
@@ -324,13 +324,13 @@ INI_DEF void ini__map_free(struct ini__map *map)
 	size_t size;
 	int i;
 
-	if (map && map->values) {
+	if (map != NULL && map->values) {
 		size = ini__map_enumerate(map, &entries);
 
 		for (i = 0; i < size; i++) {
 			cur = entries[i];
 
-			if (cur->value) {
+			if (cur->value != NULL) {
 				map->free(cur->value);
 			}
 
@@ -356,14 +356,14 @@ INI_DEF const char *ini_get(ini_t ini, const char *section, const char *key,
 	struct ini__map *_section;
 	const char *value;
 
-	section = (section) ? section : INI_DEF_SECTION_NAME;
+	section = (section != NULL) ? section : INI_DEF_SECTION_NAME;
 
-	if (ini && key && ini->size > 0) {
+	if (ini != NULL && key != NULL && ini->size > 0) {
 		_section = (struct ini__map*) ini__map_get(ini, section);
 
 		if (_section) {
 			value = (const char *) ini__map_get(_section, key);
-			return (value) ? value : _default;
+			return (value != NULL) ? value : _default;
 		}
 	}
 
@@ -375,12 +375,12 @@ INI_DEF void ini_set(ini_t ini, const char *section, const char *key,
 {
 	struct ini__map *_section;
 
-	section = (section) ? section : INI_DEF_SECTION_NAME;
+	section = (section != NULL) ? section : INI_DEF_SECTION_NAME;
 
-	if (ini && key && value) {
+	if (ini != NULL && key != NULL && value != NULL) {
 		_section = (struct ini__map*) ini__map_get(ini, section);
 
-		if (!_section) {
+		if (_section == NULL) {
 			_section = ini__map_new(free);
 			ini__map_put(ini, section, _section);
 		}
@@ -391,7 +391,7 @@ INI_DEF void ini_set(ini_t ini, const char *section, const char *key,
 
 INI_DEF void ini_free(ini_t ini)
 {
-	if (ini) {
+	if (ini != NULL) {
 		ini__map_free(ini);
 	}
 }
@@ -401,6 +401,7 @@ INI_DEF void ini_free(ini_t ini)
 INI_DEF ini_bool_t ini__io_string_eof(struct ini__io *io)
 {
 	const char *p = (const char*) io->raw;
+	if (io == NULL) return ini_true;
 	return *p == '\0';
 }
 
@@ -409,6 +410,7 @@ INI_DEF int ini__io_string_getc(struct ini__io *io)
 	int ch = INI_IO_EOF;
 	const char *p = (const char*) io->raw;
 
+	if (io == NULL) return ch;
 	if (!ini__io_string_eof(io)) ch = *p++;
 	
 	io->raw = (void*) p;
@@ -418,7 +420,7 @@ INI_DEF int ini__io_string_getc(struct ini__io *io)
 
 INI_DEF void ini__io_string(struct ini__io *io, const char *str)
 {
-	if (io) {
+	if (io != NULL) {
 		io->raw = (void*) str;
 		io->type = INI__IO_READ;
 		io->peek = INI_IO_PEEK;
@@ -430,6 +432,7 @@ INI_DEF void ini__io_string(struct ini__io *io, const char *str)
 
 INI_DEF ini_bool_t ini__io_file_eof(struct ini__io *io)
 {
+	if (io == NULL) return ini_true;
 	return feof((FILE*) io->raw);
 }
 
@@ -447,13 +450,13 @@ INI_DEF int ini__io_file_getc(struct ini__io *io)
 
 INI_DEF void ini__io_file_putc(struct ini__io *io, int ch)
 {
-	fputc(ch, (FILE*) io->raw);
+	if (io != NULL) fputc(ch, (FILE*) io->raw);
 }
 
 INI_DEF void ini__io_file(struct ini__io *io, FILE *fp,
 				enum ini__io_type type)
 {
-	if (io) {
+	if (io != NULL) {
 		io->raw = (void*) fp;
 		io->type = type;
 		io->peek = INI_IO_PEEK;
@@ -500,7 +503,7 @@ INI_DEF char *ini__io_read_line(struct ini__io *io)
 
 INI_DEF void ini__io_write_line(struct ini__io *io, const char *line)
 {
-	if (line && io && io->type == INI__IO_WRITE) {
+	if (line != NULL && io != NULL && io->type == INI__IO_WRITE) {
 		while (*line != '\0') {
 			io->putc(io, *line++);
 		}
@@ -515,7 +518,7 @@ INI_DEF size_t ini__parse_line_in_quotes(const char *line)
 {
 	size_t index = 0;
 
-	if (line && *line == '"') {
+	if (line != NULL && *line == '"') {
 		while (*line++) {
 			if (*line == '\0') {
 				index = 0;
@@ -535,7 +538,7 @@ INI_DEF void ini__parse_line_remove_comment(char *line)
 {
 	ini_bool_t is_quoted = ini_false;
 
-	if (!line) return;
+	if (line == NULL) return;
 
 	do {
 		if (*line == '"') {
@@ -556,7 +559,7 @@ INI_DEF void ini__parse_line_trim(char **line)
 	size_t len;
 	char *p = *line;
 
-	if (line && p) {
+	if (line != NULL && p != NULL) {
 		len = strlen(p);
 
 		while (isspace(p[len - 1])) --len;
@@ -574,16 +577,16 @@ INI_DEF ini_bool_t ini__parse_line_section(struct ini__parse_state *state,
 	struct ini__map *section;
 	char *section_name;
 
-	if (line && *line == '[') {
+	if (line != NULL && *line == '[') {
 		section_name = strdup(line);
 
-		if (section_name) {
+		if (section_name != NULL) {
 			sscanf(line, "[%[^]]", section_name);
 
 			section = (struct ini__map*) ini__map_get(state->ini,
 								section_name);
 
-			if (!section) {
+			if (section == NULL) {
 				section = ini__map_new(free);
 				ini__map_put(state->ini, section_name,
 							section);
@@ -606,7 +609,7 @@ INI_DEF void ini__parse_line_split(const char *line, char **key,
 	ini_bool_t delim_found = ini_false;
 	char *_value, *_key;
 
-	if (line) {
+	if (line != NULL) {
 		while (*(line + delim_pos) != '\0') {
 			if (ini__is_delim(*(line + delim_pos))) {
 				delim_found = ini_true;
@@ -646,7 +649,7 @@ INI_DEF ini_t ini__parse(struct ini__io *io)
 	char *line, *key, *value;
 	struct ini__parse_state state = {0};
 
-	if (!io) return NULL;
+	if (io == NULL) return NULL;
 
 	state.cur_section = ini__map_new(free);
 	state.ini = ini_new();
@@ -658,7 +661,7 @@ INI_DEF ini_t ini__parse(struct ini__io *io)
 		ini__parse_line_remove_comment(line);
 		ini__parse_line_trim(&line);
 
-		if (line) {
+		if (line != NULL) {
 			if (ini__parse_line_section(&state, line)) {
 				free(line);
 				continue;
@@ -721,7 +724,7 @@ INI_DEF size_t ini__store_section(struct ini__map *sec,
 	char *tmp;
 	int i;
 
-	if (sec && io && io->type == INI__IO_WRITE) {
+	if (sec != NULL && io != NULL && io->type == INI__IO_WRITE) {
 		size = ini__map_enumerate(sec, &entries);
 
 		for (i = 0; i < size; i++) {
@@ -756,13 +759,13 @@ INI_DEF void ini__store(ini_t ini, struct ini__io *io)
 	char *tmp;
 	int i;
 
-	if (ini && io && io->type == INI__IO_WRITE) {
+	if (ini != NULL && io != NULL && io->type == INI__IO_WRITE) {
 		size = ini__map_enumerate(ini, &entries);
 
 		_value = (struct ini__map*) ini__map_get(ini,
 					INI_DEF_SECTION_NAME);
 
-		if (_value) {
+		if (_value != NULL) {
 			if (ini__store_section(_value, io))
 				io->putc(io, '\n');
 		}
@@ -782,7 +785,8 @@ INI_DEF void ini__store(ini_t ini, struct ini__io *io)
 
 			ini__io_write_line(io, tmp);
 			ini__store_section(_value, io);
-			io->putc(io, '\n');
+
+			if (i <= size - 2) io->putc(io, '\n');
 			
 			free(tmp);
 		}
