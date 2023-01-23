@@ -446,24 +446,6 @@ INI_DEF void ini__io_file_putc(struct ini__io *io, int ch)
 	if (io != NULL) fputc(ch, (FILE*) io->raw);
 }
 
-INI_DEF void ini__io_file(struct ini__io *io, FILE *fp,
-				enum ini__io_type type)
-{
-	if (io != NULL) {
-		io->raw = (void*) fp;
-		io->type = type;
-		io->peek = INI_IO_PEEK;
-
-		if (type == INI__IO_READ) {
-			io->getc = ini__io_file_getc;
-			io->eof = ini__io_file_eof;
-		}
-		else {
-			io->putc = ini__io_file_putc;
-		}
-	}
-}
-
 INI_DEF char *ini__io_read_line(struct ini__io *io)
 {
 	size_t size = 1;

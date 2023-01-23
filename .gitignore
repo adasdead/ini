@@ -52,4 +52,9 @@ Mkfile.old
 dkms.conf
 
 # Example build
-example/example
+example/example_file_c
+example/example_file_cpp
+example/example_str_c
+
+# vscode
+.vscode/

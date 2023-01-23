@@ -1,7 +1,0 @@
-{
-    "files.associations": {
-        "typeinfo": "c",
-        "chrono": "c",
-        "system_error": "c"
-    }
-}
