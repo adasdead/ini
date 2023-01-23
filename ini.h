@@ -30,6 +30,9 @@
 #include <ctype.h>
 
 #ifdef __cplusplus
+
+#include <iostream>
+
 namespace ini
 {
 extern "C" {
@@ -50,18 +53,8 @@ extern "C" {
 #define ini__map_keys_equal(hash1, key1, hash2, key2)		\
 	((hash1 == hash2) && (strcmp(key1, key2) == 0))
 
-#define ini__is_comment(ch)					\
-	((ch) == ';' || (ch) == '#')
-
-#define ini__is_delim(ch)					\
-	((ch) == ':' || (ch) == '=')
-
-typedef unsigned long				ini__hash_t;
-typedef enum ini_bool				ini_bool_t;
-
-typedef struct ini__map				*ini_t;
-
-typedef void (*ini__map_free_value_fn)(void *ptr);
+#define ini__is_comment(ch)	((ch) == ';' || (ch) == '#')
+#define ini__is_delim(ch)	((ch) == ':' || (ch) == '=')
 
 enum ini_bool {
 	ini_false, ini_true,
@@ -70,6 +63,12 @@ enum ini_bool {
 enum ini__io_type {
 	INI__IO_READ, INI__IO_WRITE
 };
+
+typedef struct ini__map				*ini_t;
+typedef unsigned long				ini__hash_t;
+typedef enum ini_bool				ini_bool_t;
+
+typedef void (*ini__map_free_value_fn)(void *ptr);
 
 struct ini__map_entry {
 	ini__hash_t				hash;
@@ -128,6 +127,7 @@ INI_DEF ini__hash_t ini__hash(const char *value)
 }
 
 /*				MAP				*/
+/*	implementation partly taken from libcutils/hashmap.c	*/
 
 INI_DEF struct ini__map *ini__map_new(ini__map_free_value_fn free_fn)
 {
@@ -137,7 +137,8 @@ INI_DEF struct ini__map *ini__map_new(ini__map_free_value_fn free_fn)
 		memset(map, 0, sizeof *map);
 
 		map->capacity = INI_MAP_START_CAPACITY;
-		map->values = calloc(map->capacity, sizeof *map->values);
+		map->values = (struct ini__map_entry**)
+				calloc(map->capacity, sizeof *map->values);
 		map->free = free_fn;
 
 		if (!map->values) {
@@ -173,7 +174,8 @@ INI_DEF void ini__map_expand(struct ini__map *map)
 
 	if (map != NULL && map->size >= map->capacity) {
 		new_capacity = map->capacity << 1;
-		new_values = calloc(new_capacity, sizeof *new_values);
+		new_values = (struct ini__map_entry**)
+				calloc(new_capacity, sizeof *new_values);
 
 		if (new_values == NULL) return;
 
@@ -219,6 +221,8 @@ INI_DEF ini_bool_t ini__map_put(struct ini__map *map, const char *key,
 
 			if (ini__map_keys_equal(hash, key, cur->hash,
 							cur->key)) {
+
+				if (cur->value != NULL) map->free(cur->value);
 				cur->value = value;
 				return ini_true;
 
@@ -299,7 +303,8 @@ INI_DEF size_t ini__map_enumerate(struct ini__map *map,
 
 			while (entry = next) {
 				next = entry->next;
-				tmp = realloc(block, ++size * sizeof *tmp);
+				tmp = (struct ini__map_entry**)
+					realloc(block, ++size * sizeof *tmp);
 
 				if (tmp != NULL) {
 					block = tmp;
@@ -377,7 +382,7 @@ INI_DEF void ini_set(ini_t ini, const char *section, const char *key,
 
 	section = (section != NULL) ? section : INI_DEF_SECTION_NAME;
 
-	if (ini != NULL && key != NULL && value != NULL) {
+	if (ini != NULL && key != NULL) {
 		_section = (struct ini__map*) ini__map_get(ini, section);
 
 		if (_section == NULL) {
@@ -402,7 +407,7 @@ INI_DEF ini_bool_t ini__io_string_eof(struct ini__io *io)
 {
 	const char *p = (const char*) io->raw;
 	if (io == NULL) return ini_true;
-	return *p == '\0';
+	return (ini_bool_t) (*p == '\0');
 }
 
 INI_DEF int ini__io_string_getc(struct ini__io *io)
@@ -411,34 +416,22 @@ INI_DEF int ini__io_string_getc(struct ini__io *io)
 	const char *p = (const char*) io->raw;
 
 	if (io == NULL) return ch;
-	if (!ini__io_string_eof(io)) ch = *p++;
+	if (!io->eof(io)) ch = *p++;
 	
 	io->raw = (void*) p;
 	io->peek = ch;
 	return ch;
 }
 
-INI_DEF void ini__io_string(struct ini__io *io, const char *str)
-{
-	if (io != NULL) {
-		io->raw = (void*) str;
-		io->type = INI__IO_READ;
-		io->peek = INI_IO_PEEK;
-
-		io->getc = ini__io_string_getc;
-		io->eof = ini__io_string_eof;
-	}
-}
-
 INI_DEF ini_bool_t ini__io_file_eof(struct ini__io *io)
 {
 	if (io == NULL) return ini_true;
-	return feof((FILE*) io->raw);
+	return (ini_bool_t) feof((FILE*) io->raw);
 }
 
 INI_DEF int ini__io_file_getc(struct ini__io *io)
 {
-	if (ini__io_file_eof(io)) {
+	if (io->eof(io)) {
 		io->peek = INI_IO_EOF;
 	}
 	else {
@@ -542,7 +535,8 @@ INI_DEF void ini__parse_line_remove_comment(char *line)
 
 	do {
 		if (*line == '"') {
-			is_quoted = ini__parse_line_in_quotes(line);
+			is_quoted = (ini_bool_t)
+				ini__parse_line_in_quotes(line);
 			continue;
 		}
 
@@ -689,14 +683,28 @@ INI_DEF ini_t ini__parse(struct ini__io *io)
 INI_DEF ini_t ini_parse_from_str(const char *str)
 {
 	struct ini__io io = {0};
-	ini__io_string(&io, str);
+	
+	io.raw = (void*) str;
+	io.type = INI__IO_READ;
+	io.peek = INI_IO_PEEK;
+
+	io.getc = ini__io_string_getc;
+	io.eof = ini__io_string_eof;
+
 	return ini__parse(&io);
 }
 
 INI_DEF ini_t ini_parse_from_file(FILE *fp)
 {
 	struct ini__io io = {0};
-	ini__io_file(&io, fp, INI__IO_READ);
+
+	io.raw = (void*) fp;
+	io.type = INI__IO_READ;
+	io.peek = INI_IO_PEEK;
+
+	io.getc = ini__io_file_getc;
+	io.eof = ini__io_file_eof;
+
 	return ini__parse(&io);
 }
 
@@ -798,7 +806,13 @@ INI_DEF void ini__store(ini_t ini, struct ini__io *io)
 INI_DEF void ini_store_to_file(ini_t ini, FILE *fp)
 {
 	struct ini__io io = {0};
-	ini__io_file(&io, fp, INI__IO_WRITE);
+
+	io.raw = (void*) fp;
+	io.type = INI__IO_WRITE;
+	io.peek = INI_IO_PEEK;
+
+	io.putc = ini__io_file_putc;
+	
 	ini__store(ini, &io);
 }
 
@@ -814,6 +828,56 @@ INI_DEF void ini_store_to_path(ini_t ini, const char *path)
 
 #ifdef __cplusplus
 }
+
+INI_DEF ini_bool_t ini__io_istream_eof(struct ini__io *io)
+{
+	if (io == NULL) return ini_true;
+	return ((std::istream*) (io->raw))->eof() ? ini_true : ini_false;
+}
+
+INI_DEF int ini__io_istream_getc(struct ini__io *io)
+{
+	if (io->eof(io)) {
+		io->peek = INI_IO_EOF;
+	}
+	else {
+		((std::istream*)(io->raw))->read(&io->peek, 1);
+	}
+
+	return io->peek;
+}
+
+INI_DEF void ini__io_ostream_putc(struct ini__io *io, int ch)
+{
+	if (io != NULL) *((std::ostream*) (io->raw)) << (char) ch;
+}
+
+INI_DEF ini_t ini_parse_from_istream(std::istream &stream)
+{
+	struct ini__io io = {0};
+	
+	io.raw = (void*) &stream;
+	io.type = INI__IO_READ;
+
+	io.getc = ini__io_istream_getc;
+	io.eof = ini__io_istream_eof;
+
+	return ini__parse(&io);
+}
+
+INI_DEF void ini_store_to_ostream(ini_t ini, std::ostream &stream)
+{
+	struct ini__io io = {0};
+
+	io.raw = (void*) &stream;
+	io.type = INI__IO_WRITE;
+	io.peek = INI_IO_PEEK;
+
+	io.putc = ini__io_ostream_putc;
+	
+	ini__store(ini, &io);
+}
+
 } /* namespace ini */
 #endif /* __cplusplus */
 
