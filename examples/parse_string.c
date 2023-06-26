@@ -3,14 +3,13 @@
 #include "ini.h"
 
 static const char *example =	"build folder = \"build/\"		\n"
-                "\n"
-                "   [game_info]\n"
-                "name=    my first game\n"
-                "year	= 1997\n"
-                "   version=1.0    ";
+                                "\n"
+                                "   [game_info]\n"
+                                "name=    my first game\n"
+                                "year	= 1997\n"
+                                "   version=1.0    ";
 
-struct game_info
-{
+struct game_info {
     const char *name;
     const char *year;
     const char *version;
@@ -25,17 +24,15 @@ static void game_info_from_ini(struct game_info *inf, ini_t ini)
 
 int main(void)
 {
+    const char *build_folder;
     ini_t ini = ini_parse_from_str(example);
     struct game_info info = {0};
-    const char *build_folder;
 
-    if (ini) {
+    if (ini != NULL) {
         build_folder = ini_get(ini, NULL, "build folder", "");
 
         puts("----------------------------------");
-
         printf("build_folder: %s\n", build_folder);
-
         puts("----------------------------------");
 
         game_info_from_ini(&info, ini);
@@ -45,9 +42,7 @@ int main(void)
         printf("version:\t%s\n", info.version);
 
         puts("----------------------------------");
-
         ini_store_to_file(ini, stdout);
-
         puts("----------------------------------");
 
         ini_free(ini);

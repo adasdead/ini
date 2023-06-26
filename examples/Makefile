@@ -1,9 +1,9 @@
 INCLUDES = -I..
 
 all:
-	$(CC) $(INCLUDES) example.c -o example.out
-	$(CC) $(INCLUDES) read_from_file.cpp -lstdc++ -o read_from_file_cpp.out
-	$(CC) $(INCLUDES) from_string.c -o from_string.out
+	$(CC) $(INCLUDES) create.c -o create.out
+	$(CC) $(INCLUDES) parse_and_print.c -o parse_and_print.out
+	$(CC) $(INCLUDES) parse_string.c -o parse_string.out
 
 clean:
-	rm example.out
+	rm create.out parse_and_print.out parse_string.out
