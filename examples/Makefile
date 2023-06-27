@@ -4,6 +4,7 @@ all:
 	$(CC) $(INCLUDES) create.c -o create.out
 	$(CC) $(INCLUDES) parse_and_print.c -o parse_and_print.out
 	$(CC) $(INCLUDES) parse_string.c -o parse_string.out
+	$(CC) $(INCLUDES) supports.cpp -o supports_cpp.out -lstdc++
 
 clean:
-	rm create.out parse_and_print.out parse_string.out
+	rm create.out parse_and_print.out parse_string.out supports_cpp.out

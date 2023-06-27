@@ -471,7 +471,7 @@ static void ini_line_unquote(char **line)
     len = strlen(*line);
 
     if (len >= 2 && p[0] == '"' && p[len - 1] == '"') {
-        result = malloc(len - 1);
+        result = (char*) malloc(len - 1);
 
         if (result == NULL)
             return;
@@ -630,26 +630,26 @@ static ini_t ini_parse(struct ini_io *io)
 
 static ini_t ini_parse_from_str(const char *str)
 {
-    struct ini_io io = {
-        .eof = ini_io_string_eof,
-        .getc = ini_io_string_getc,
-        .peek = INI_IO_PEEK,
-        .raw = (void*) str,
-        .type = INI_IO_READ,
-    };
+    struct ini_io io = {0};
+
+    io.eof = ini_io_string_eof;
+    io.getc = ini_io_string_getc;
+    io.peek = INI_IO_PEEK;
+    io.raw = (void*) str;
+    io.type = INI_IO_READ;
 
     return ini_parse(&io);
 }
 
 static ini_t ini_parse_from_file(FILE *fp)
 {
-    struct ini_io io = {
-        .eof = ini_io_file_eof,
-        .getc = ini_io_file_getc,
-        .peek = INI_IO_PEEK,
-        .raw = (void*) fp,
-        .type = INI_IO_READ,
-    };
+    struct ini_io io = {0};
+
+    io.eof = ini_io_file_eof;
+    io.getc = ini_io_file_getc;
+    io.peek = INI_IO_PEEK;
+    io.raw = (void*) fp;
+    io.type = INI_IO_READ;
 
     return ini_parse(&io);
 }
@@ -747,12 +747,12 @@ static void ini_store(ini_t ini, struct ini_io *io)
 
 static void ini_store_to_file(ini_t ini, FILE *fp)
 {
-    struct ini_io io = {
-        .peek = INI_IO_PEEK,
-        .putc = ini_io_file_putc,
-        .raw = (void*) fp,
-        .type = INI_IO_WRITE,
-    };
+    struct ini_io io = {0};
+    
+    io.peek = INI_IO_PEEK;
+    io.putc = ini_io_file_putc;
+    io.raw = (void*) fp;
+    io.type = INI_IO_WRITE;
     
     ini_store(ini, &io);
 }

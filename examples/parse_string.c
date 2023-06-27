@@ -2,12 +2,13 @@
 
 #include "ini.h"
 
-static const char *example =	"build folder = \"build/\"		\n"
-                                "\n"
-                                "   [game_info]\n"
-                                "name=    my first game\n"
-                                "year	= 1997\n"
-                                "   version=1.0    ";
+static const char *example =
+    "build folder = \"build/\"		\n"
+    "\n"
+    "   [game_info]\n"
+    "name=    my first game\n"
+    "year	= 1997\n"
+    "   version=1.0    ";
 
 struct game_info {
     const char *name;
