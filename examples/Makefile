@@ -1,10 +1,10 @@
 INCLUDES = -I..
 
 all:
-	$(CC) $(INCLUDES) create.c -o create.out
+	$(CC) $(INCLUDES) store_to_file.c -o store_to_file.out
 	$(CC) $(INCLUDES) parse_and_print.c -o parse_and_print.out
 	$(CC) $(INCLUDES) parse_string.c -o parse_string.out
-	$(CC) $(INCLUDES) supports.cpp -o supports_cpp.out -lstdc++
+	$(CC) $(INCLUDES) custom_io.cpp -o custom_io.out -lstdc++
 
 clean:
-	rm create.out parse_and_print.out parse_string.out supports_cpp.out
+	rm store_to_file.out parse_and_print.out parse_string.out custom_io.out

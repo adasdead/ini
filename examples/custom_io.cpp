@@ -11,6 +11,16 @@ static void ini_io_ostream_putc(ini_io *io, int ch)
 	}
 }
 
+static void ini_store_to_stream(ini_t ini, std::ostream &stream)
+{
+    ini_io io {0};
+    io.raw = reinterpret_cast<void*>(&std::cout);
+    io.mode = INI_IO_MODE_WRITE;
+	io.putc = ini_io_ostream_putc;
+
+    ini_store(ini, &io);
+}
+
 int main()
 {
     std::ostringstream ini_string;
@@ -19,14 +29,8 @@ int main()
     ini_string << "file_name = supports.cpp" << std::endl;
 
 	ini_t ini = ini_parse_from_str(ini_string.str().data());
-
-    ini_io console_output {0};
-	console_output.raw = reinterpret_cast<void*>(&std::cout);
-	console_output.type = INI_IO_WRITE;
-	console_output.peek = INI_IO_PEEK;
-	console_output.putc = ini_io_ostream_putc;
-
-	ini_set(ini, "hello", "year", "2023");
-	ini_store(ini, &console_output);
+    ini_set(ini, nullptr, "hello", "world");
+    ini_store_to_stream(ini, std::cout);
+    ini_free(ini);
     return 0;
 }

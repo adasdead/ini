@@ -1,26 +1,8 @@
-/*
- * MIT License
- *
- * Copyright (c) 2023 adasdead
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/*  ____  ____   ____   Copyright (c) 2023 adasdead
+ * |    ||  _ \ |    |  This software is licensed under the MIT License.
+ *  |  | |  |  | |  |   Header-only C/C++ INI library
+ * |____||__|__||____|  https://github.com/adasdead/ini
+*/
 
 #ifndef INI_H_INCLUDED
 #define INI_H_INCLUDED
@@ -29,10 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #define INI_MAP_START_CAPACITY              16
+#define INI_MAP_LOAD_FACTOR                 0.75
 #define INI_DEFAULT_SECTION_NAME            "DEFAULT"
-#define INI_IO_PEEK                         '\0'
+#define INI_COMMENT_SYMBOLS                 ";#"
+#define INI_KEY_VALUE_SEPARATORS            "=:"
 
 #define ini_strdup(str)                                                     \
     ((str) ? ini_strndup(str, strlen(str)) : NULL)
@@ -43,26 +28,35 @@
 #define ini_map_keys_equal(hash1, key1, hash2, key2)                        \
     ((hash1 == hash2) && (strcmp(key1, key2) == 0))
 
-#define ini_is_comment_char(ch)     ((ch) == ';' || (ch) == '#')
-#define ini_is_delimiter_char(ch)   ((ch) == ':' || (ch) == '=')
-
 #ifdef _cplusplus
 extern "C" {
 #endif /* _cplusplus */
 
-enum ini_bool {
-    ini_false,
-    ini_true,
+enum ini_io_mode {
+    INI_IO_MODE_READ, /* READ ONLY */
+    INI_IO_MODE_WRITE /* WRITE ONLY */
 };
 
-enum ini_io_type {
-    INI_IO_READ,
-    INI_IO_WRITE
-};
-
+/**
+ * The `ini_t` type is a storage of sections, keys and their values.
+ * In fact, it is a hash map in which another hash map is nested.
+ * 
+ * WARNING: Don't forget to free memory with `ini_free`
+ * 
+ * Stores INI data in the form of the following table:
+ * +---------------------------+---------------+---------------+
+ * |          section          |      key      |     value     |
+ * +---------------------------+---------------+---------------+
+ * |          DEFAULT          |      ...      |      ...      |
+ * |            ...            |      ...      |      ...      |
+ * +^^^^^^^^^^^^^^^^^^^^^^^^^^^+^^^^^^^^^^^^^^^+^^^^^^^^^^^^^^^+
+*/
 typedef struct ini_map                     *ini_t;
-typedef enum ini_bool                       ini_bool_t;
 
+/**
+ * The `ini_map_free_value` type is used to pass a function to free
+ * memory for values stored in the `ini_map` structure.
+*/
 typedef void (*ini_map_free_value)(void *ptr);
 
 struct ini_map_entry {
@@ -72,7 +66,13 @@ struct ini_map_entry {
     struct ini_map_entry                   *next;
 };
 
-/* implementation partly taken from libcutils/hashmap.c */
+/**
+ * Hash table that stores all key-value pairs.
+ * 
+ * WARNING: Don't forget to free memory with `ini_map_free`
+ * 
+ * Based on implementation `libcutils/hashmap.c`
+ */
 struct ini_map {
     struct ini_map_entry                  **values;
     ini_map_free_value                      free;
@@ -80,41 +80,103 @@ struct ini_map {
     size_t                                  size;
 };
 
+/**
+ * This is a structure that defines the I/O interface for working
+ * with INI.
+*/
 struct ini_io {
+    /* Raw pointer to the data to be processed */
     void                                   *raw;
-    enum ini_io_type                        type;
+    /* INI_IO_MODE_READ or INI_IO_MODE_WRITE */
+    enum ini_io_mode                        mode;
+    /* Last read character. Default `\0` */
     char                                    peek;
-
+    /* Pointer to a function to read one character from `raw` */
     int (*getc)(struct ini_io*);
+    /* Pointer to a function to write one character to `raw` */
     void (*putc)(struct ini_io*, int);
-    ini_bool_t (*eof)(struct ini_io*);
+    /* Pointer to a function that checks `raw` for the end-of-file */
+    bool (*eof)(struct ini_io*);
 };
 
+/**
+ * A structure for storing the current state of the parser.
+*/
 struct ini_parse_state {
     struct ini_map                         *cur_section;
     ini_t                                   ini;
 };
 
+/**
+ * Creates a `str` duplicate and returns a pointer to it. In case of
+ * error, NULL is returned. `size` - the size of the string to be
+ * duplicated.
+ * 
+ * WARNING: Memory is allocated for a duplicate of a string. Don't
+ * forget to release it.
+ * 
+ * This function is written because POSIX strndup is not part of the
+ * ANSI/ISO standard.
+ */
 static char *ini_strndup(const char *str, size_t size)
 {
     char *tmp = NULL;
 
     if (str != NULL) {
-        if (tmp = (char*) calloc(size + 1, sizeof *tmp))
+        tmp = (char*) calloc(size + 1, sizeof *tmp);
+
+        if (tmp != NULL)
             strncpy(tmp, str, size);
     }
 
     return tmp;
 }
 
-/* djb2 algo: http://www.cse.yorku.ca/~oz/hash.html */
-static unsigned int ini_djb2_hash(const char *string)
+/**
+ * Returns the current string, but with leading and trailing spaces
+ * removed. If a string consists of only spaces, then its string is
+ * replaced with zeros.
+ */
+static char *ini_strtrim(char *str)
+{
+    size_t last, first;
+    size_t size = strlen(str);
+
+    if (str == NULL || *str == '\0')
+        return str;
+
+    /* Finding the first non-whitespace character */
+    for (first = 0; isspace(str[first]); ++first);
+    /* Finding the last non-whitespace character */
+    for (last = size - 1; isspace(str[last]) && last > 0; --last);
+
+    if (first > last) {
+        memset(str, '\0', size);
+        return str;
+    }
+    
+    memmove(str, str + first, last - first + 1);
+    str[last - first + 1] = '\0';
+    return str;
+}
+
+/**
+ * Hash function to get the hash of the string `str`, as an
+ * unsigned int value, using the djb2 algorithm. Used in hash maps to
+ * look up the value of a key.
+ * 
+ * WARNING: The string must end with `\0`, otherwise it may lead to
+ * undefined behavior.
+ * 
+ * Read more: http://www.cse.yorku.ca/~oz/hash.html
+ */
+static unsigned int ini_djb2_hash(const char *str)
 {
     unsigned char ch;
     unsigned int hash = 5381;
 
-    if (string != NULL) {
-        while ((ch = *string++) != '\0') {
+    if (str != NULL) {
+        while ((ch = *str++) != '\0') {
             hash = ((hash << 5) + hash) + ch;
         }
     }
@@ -122,6 +184,12 @@ static unsigned int ini_djb2_hash(const char *string)
     return hash;
 }
 
+/**
+ * Creates a new hash map and returns NULL on error.
+ * 
+ * WARNING: If the `free_fn` function pointer is NULL, the hash map
+ * values will not be freed and a memory leak may occur.
+*/
 static struct ini_map *ini_map_new(ini_map_free_value free_fn)
 {
     struct ini_map *map = (struct ini_map*) malloc(sizeof *map);
@@ -130,9 +198,9 @@ static struct ini_map *ini_map_new(ini_map_free_value free_fn)
         memset(map, 0, sizeof *map);
 
         map->capacity = INI_MAP_START_CAPACITY;
+        map->free = free_fn;
         map->values = (struct ini_map_entry**)
                 calloc(map->capacity, sizeof *map->values);
-        map->free = free_fn;
 
         if (!map->values) {
             free(map);
@@ -143,6 +211,10 @@ static struct ini_map *ini_map_new(ini_map_free_value free_fn)
     return map;
 }
 
+/**
+ * Creates a new hash table entry. Returns a pointer to the new
+ * element of the hash table, or NULL on error.
+ */
 static struct ini_map_entry*
 ini_map_entry_new(unsigned int hash, const char *key, void *value)
 {
@@ -159,77 +231,94 @@ ini_map_entry_new(unsigned int hash, const char *key, void *value)
     return entry;
 }
 
+/**
+ * Expands the hash table by doubling its capacity and rehashing all
+ * elements. Returns nothing, but may change the hash table pointer
+ * if memory is re-allocated.
+*/
 static void ini_map_expand(struct ini_map *map)
 {
-    size_t new_capacity, index;
-    struct ini_map_entry **new_values;
     struct ini_map_entry *entry, *next;
-    int i;
+    struct ini_map_entry **old_values;
+    size_t old_capacity;
+    size_t i, index;
 
-    if (map != NULL && map->size >= map->capacity) {
-        new_capacity = map->capacity << 1;
-        new_values = (struct ini_map_entry**)
-                calloc(new_capacity, sizeof *new_values);
+    if (map == NULL)
+        return;
 
-        if (new_values == NULL)
+    if ((double)map->size / map->capacity > INI_MAP_LOAD_FACTOR) {
+        old_capacity = map->capacity;
+        old_values = map->values;
+
+        map->capacity <<= 1;
+        map->values = (struct ini_map_entry**)
+            calloc(map->capacity, sizeof *map->values);
+
+        if (map->values == NULL) {
+            map->capacity = old_capacity;
+            map->values = old_values;
             return;
+        }
 
-        for (i = 0; i < map->capacity; ++i) {
-            next = map->values[i];
-
-            while (entry = next) {
+        for (i = 0; i < old_capacity; ++i) {
+            entry = old_values[i];
+            
+            while (entry != NULL) {
                 next = entry->next;
-                index = ini_map_index(entry->hash, new_capacity);
-                entry->next = new_values[index];
-                new_values[index] = entry;
+                index = ini_map_index(entry->hash, map->capacity);
+                entry->next = map->values[index];
+                map->values[index] = entry;
+                entry = next;
             }
         }
-
-        free(map->values);
-        map->capacity = new_capacity;
-        map->values = new_values;
+        
+        free(old_values);
     }
 }
 
-static ini_bool_t
-ini_map_put(struct ini_map *map, const char *key, void *value)
+/**
+ * Associates the specified value with the specified key in this map.
+ * Does nothing if `map` or `key` is NULL. Returns true if everything
+ * went well.
+*/
+static bool ini_map_put(struct ini_map *map, const char *key, void *value)
 {
-    struct ini_map_entry **p, *cur;
-    unsigned int hash;
+    unsigned int hash = ini_djb2_hash(key);
+    size_t index = ini_map_index(hash, map->capacity);
+    struct ini_map_entry *entry = map->values[index];
 
-    if (map != NULL && key != NULL) {
-        hash = ini_djb2_hash(key);
+    if (map == NULL && key == NULL && *key == '\0')
+        return false;
 
-        p = &(map->values[ini_map_index(hash, map->capacity)]);
+    while (entry != NULL) {
+        if (ini_map_keys_equal(hash, key, entry->hash, entry->key)) {
+            if (map->free != NULL)
+                map->free(entry->value);
 
-        while (p != NULL) {
-            if ((cur = *p) == NULL) {
-                *p = ini_map_entry_new(hash, key, value);
-                
-                if (*p == NULL)
-                    break; /* it's not leak */
-                
-                map->size++;
-
-                ini_map_expand(map);
-                break;
-            }
-
-            if (ini_map_keys_equal(hash, key, cur->hash, cur->key)) {
-                if (cur->value != NULL)
-                    map->free(cur->value);
-                
-                cur->value = value;
-                return ini_true;
-            }
-
-            p = &cur->next;
+            entry->value = value;
+            return true;
         }
+        
+        entry = entry->next;
+    }
+    
+    entry = ini_map_entry_new(hash, key, value);
+
+    if (entry != NULL) {
+        entry->next = map->values[index];
+        map->values[index] = entry;
+        map->size++;
+        ini_map_expand(map);
+        return true;
     }
 
-    return ini_false;
+    return false;
 }
 
+/**
+ * Returns the value associated with the specified key, or NULL if
+ * this map does not contain the given key.
+*/
 static void *ini_map_get(struct ini_map *map, const char *key)
 {
     struct ini_map_entry *entry;
@@ -251,66 +340,47 @@ static void *ini_map_get(struct ini_map *map, const char *key)
     return value;
 }
 
-static ini_bool_t ini_map_remove(struct ini_map *map, const char *key)
-{
-    struct ini_map_entry **p, *cur;
-    unsigned int hash;
-
-    if (map != NULL && key != NULL) {
-        hash = ini_djb2_hash(key);
-
-        p = &(map->values[ini_map_index(hash, map->capacity)]);
-
-        while (cur = *p) {
-            if (ini_map_keys_equal(cur->hash, cur->key, hash, key)) {
-                *p = cur->next;
-                map->free(cur->value);
-                free(cur->key);
-                free(cur);
-                map->size--;
-                return ini_true;
-            }
-
-            p = &cur->next;
-        }
-    }
-
-    return ini_false;
-}
-
+/**
+ * Returns an array of pointers to the ini_map_entry elements via the
+ * `entries` pointer, stored in the ini_map structure. This function
+ * can be used to iterate over all key-value pairs in a hash map.
+ * The function returns the number of elements in the `entries` array.
+ * If an error occurs, the function returns 0.
+ * 
+ * WARNING: Memory is allocated for `entries`. Don't forget to free it
+ * with `free`
+*/
 static size_t
 ini_map_enumerate(struct ini_map *map, struct ini_map_entry ***entries)
 {
-    struct ini_map_entry **tmp, **block = NULL;
-    struct ini_map_entry *entry, *next;
-    size_t size = 0;
-    int i;
+    struct ini_map_entry *entry;
+    size_t count = 0;
+    size_t i;
 
-    if (map != NULL && map->values) {
-        for (i = 0; i < map->capacity; ++i) {
-            next = map->values[i];
+    if (map == NULL && entries == NULL)
+        return 0;
 
-            while (entry = next) {
-                next = entry->next;
-                tmp = (struct ini_map_entry**)
-                    realloc(block, ++size * sizeof *tmp);
+    *entries = (struct ini_map_entry **)
+        malloc(map->size * sizeof(struct ini_map_entry*));
+    
+    if (*entries == NULL)
+        return 0;
+    
+    for (i = 0; i < map->capacity; ++i) {
+        entry = map->values[i];
 
-                if (tmp != NULL) {
-                    block = tmp;
-                    block[size - 1] = entry;
-                }
-                else {
-                    size--;
-                    break;
-                }
-            }
+        while (entry != NULL) {
+            (*entries)[count++] = entry;
+            entry = entry->next;
         }
     }
-
-    *entries = block;
-    return size;
+    
+    return count;
 }
 
+/**
+ * Frees memory for `map`
+*/
 static void ini_map_free(struct ini_map *map)
 {
     struct ini_map_entry **entries, *cur;
@@ -323,7 +393,7 @@ static void ini_map_free(struct ini_map *map)
         for (i = 0; i < size; ++i) {
             cur = entries[i];
 
-            if (cur->value != NULL)
+            if (cur->value != NULL && map->free != NULL)
                 map->free(cur->value);
 
             free(cur->key);
@@ -336,61 +406,88 @@ static void ini_map_free(struct ini_map *map)
     }
 }
 
+/**
+ * Creates a new ini_t object, which is a data structure for working
+ * with INI files.
+*/
 static ini_t ini_new(void) {
     return ini_map_new((ini_map_free_value) ini_map_free);
 }
 
+/**
+ * Retrieves a string from the specified section in `ini` by key.
+ * 
+ * Returns the value of the key `key` in the `section`, otherwise, if,
+ * for example, the key does not exist, returns the value `def`.
+ * 
+ * If `section` is NULL, then the default `INI_DEFAULT_SECTION_NAME`
+ * constant will be used.
+*/
 static const char*
 ini_get(ini_t ini, const char *section, const char *key, const char *def)
 {
     struct ini_map *_section;
+    const char *section_name = section ? section : INI_DEFAULT_SECTION_NAME;
     const char *value;
 
-    section = (section != NULL) ? section : INI_DEFAULT_SECTION_NAME;
-
     if (ini != NULL && key != NULL && ini->size > 0) {
-        _section = (struct ini_map*) ini_map_get(ini, section);
+        _section = (struct ini_map*) ini_map_get(ini, section_name);
 
-        if (_section != NULL) {
+        if (_section != NULL)
             value = (const char *) ini_map_get(_section, key);
-            return (value != NULL) ? value : def;
-        }
     }
 
-    return def;
+    return (value != NULL) ? value : def;
 }
 
+/**
+ * Associates a string with a key in the specified section in `ini`.
+ * 
+ * If `section` is NULL, then the default `INI_DEFAULT_SECTION_NAME`
+ * constant will be used.
+ * 
+ * NOTE: You can also assign NULL to `value` to make the value not
+ * equal to anything.
+*/
 static void
 ini_set(ini_t ini, const char *section, const char *key, const char *value)
 {
     struct ini_map *_section;
-
-    section = (section != NULL) ? section : INI_DEFAULT_SECTION_NAME;
+    const char *section_name = section ? section : INI_DEFAULT_SECTION_NAME;
 
     if (ini != NULL && key != NULL) {
-        _section = (struct ini_map*) ini_map_get(ini, section);
+        _section = (struct ini_map*) ini_map_get(ini, section_name);
 
         if (_section == NULL) {
             _section = ini_map_new(free);
-            ini_map_put(ini, section, _section);
+            ini_map_put(ini, section_name, _section);
         }
 
         ini_map_put(_section, key, (void*) ini_strdup(value));
     }
 }
 
+/**
+ * Frees memory for `ini`
+*/
 static void ini_free(ini_t ini)
 {
     if (ini != NULL)
         ini_map_free(ini);
 }
 
-static ini_bool_t ini_io_string_eof(struct ini_io *io)
+/**
+ * Checks if the end of a line has been reached in the I/O stream.
+*/
+static bool ini_io_string_eof(struct ini_io *io)
 {
     const char *p = (const char*) io->raw;
-    return (ini_bool_t) ((io != NULL) ? (*p == '\0') : ini_true);
+    return (bool) ((io != NULL) ? (*p == '\0') : true);
 }
 
+/**
+ * Returns the next character from the I/O string stream.
+*/
 static int ini_io_string_getc(struct ini_io *io)
 {
     int ch = EOF;
@@ -404,11 +501,17 @@ static int ini_io_string_getc(struct ini_io *io)
     return ch;
 }
 
-static ini_bool_t ini_io_file_eof(struct ini_io *io)
+/**
+ * Checks if the end of the file has been reached in the I/O stream.
+*/
+static bool ini_io_file_eof(struct ini_io *io)
 {
-    return (ini_bool_t) ((io != NULL) ? feof((FILE*) io->raw) : ini_true);
+    return (bool) ((io != NULL) ? feof((FILE*) io->raw) : true);
 }
 
+/**
+ * Returns the next character from the I/O file stream.
+*/
 static int ini_io_file_getc(struct ini_io *io)
 {
     if (io->eof(io))
@@ -419,241 +522,287 @@ static int ini_io_file_getc(struct ini_io *io)
     return io->peek;
 }
 
+/**
+ * Writes the character ch to the I/O file stream.
+*/
 static void ini_io_file_putc(struct ini_io *io, int ch)
 {
     if (io != NULL)
         fputc(ch, (FILE*) io->raw);
 }
 
+/**
+ * Reads a line from the I/O input stream and returns it. Returns NULL
+ * if the end of file has been reached or an error has occurred.
+*/
 static char *ini_io_read_line(struct ini_io *io)
 {
-    size_t size = 1;
+    size_t size = 0;
+    size_t capacity = 0;
     char *buffer = NULL;
     char *block;
 
-    if (io && io->type == INI_IO_READ) {
+    if (io != NULL && io->mode == INI_IO_MODE_READ) {
         while (!io->eof(io)) {
             if (io->getc(io) == '\n' || io->peek == EOF)
                 break;
 
-            block = (char*) realloc(buffer, ++size);
+            if ((size + 1) >= capacity) {
+                capacity += 64;
 
-            if (block) {
-                buffer = block;
-                buffer[size - 2] = io->peek;
-                buffer[size - 1] = '\0';
+                block = (char*) realloc(buffer, capacity);
+
+                if (block)
+                    buffer = block;
+                else
+                    break;
             }
-            else break;
+
+            buffer[size++] = io->peek;
+            buffer[size] = '\0';
         }
     }
 
     return buffer;
 }
 
-static void ini_io_write_line(struct ini_io *io, const char *line)
+/**
+ * Writes the string line to the output stream I/O.
+*/
+static void ini_io_write(struct ini_io *io, const char *line)
 {
-    if (line != NULL && io != NULL && io->type == INI_IO_WRITE) {
+    if (line != NULL && io != NULL && io->mode == INI_IO_MODE_WRITE) {
         while (*line != '\0')
             io->putc(io, *line++);
-        
-        io->putc(io, '\n');
     }
 }
 
-static void ini_line_unquote(char **line)
-{
-    size_t len;
-    char *result, *p = *line;
-
-    if (line == NULL || p == NULL)
-        return;
-
-    len = strlen(*line);
-
-    if (len >= 2 && p[0] == '"' && p[len - 1] == '"') {
-        result = (char*) malloc(len - 1);
-
-        if (result == NULL)
-            return;
-        
-        strncpy(result, p + 1, len - 2);
-        result[len - 2] = '\0';
-        free(*line);
-        *line = result;
-    }
-}
-
-static void ini_line_remove_comment(char *line)
-{
-    if (line == NULL)
-        return;
-
-    do {
-        if (ini_is_comment_char(*line)) {
-            *line = '\0';
-            break;
-        }
-
-    } while (*line++);
-}
-
-static void ini_line_trim(char **line)
-{
-    size_t len;
-    char *p = *line;
-
-    if (line != NULL && p != NULL) {
-        len = strlen(p);
-
-        while (isspace(p[len - 1])) --len;
-        while (*p && isspace(*p)) ++p, --len;
-
-        p = ini_strndup(p, len);
-        free(*line);
-        *line = p;
-    }
-}
-
-static ini_bool_t
+/**
+ * The ini_parse_line_section function parses the line containing the
+ * section name and creates a new section in the ini_t structure.
+*/
+static void
 ini_parse_line_section(struct ini_parse_state *state, const char *line)
 {
     struct ini_map *section;
     char *section_name;
+    const char *end;
 
     if (line != NULL && *line == '[') {
-        section_name = strdup(line);
+        end = strchr(line, ']');
 
-        if (section_name != NULL) {
-            sscanf(line, "[%[^]]", section_name);
+        if (end == NULL)
+            return;
 
-            section = (struct ini_map*)
-                ini_map_get(state->ini, section_name);
+        section_name = ini_strndup(line + 1, end - line - 1);
+        
+        if (section_name == NULL)
+            return;
 
-            if (section == NULL) {
-                section = ini_map_new(free);
-                ini_map_put(state->ini, section_name, section);
-            }
+        section = (struct ini_map*)
+            ini_map_get(state->ini, section_name);
 
-            state->cur_section = section;
+        if (section == NULL) {
+            section = ini_map_new(free);
 
-            free(section_name);
-            return ini_true;
-        }
-    }
-
-    return ini_false;
-}
-
-static void ini_line_split(const char *line, char **key, char **value)
-{
-    size_t delim_pos = 0;
-    ini_bool_t delim_found = ini_false;
-    char *_value, *_key;
-
-    if ((*key) == NULL && (*value) == NULL)
-        return;
-
-    if (line != NULL) {
-        while (*(line + delim_pos) != '\0') {
-            if (ini_is_delimiter_char(*(line + delim_pos))) {
-                delim_found = ini_true;
-                break;
-            }
-
-            delim_pos++;
-        }
-
-        if (delim_found) {
-            _key = ini_strndup(line, delim_pos);
-            _value = ini_strdup(line + delim_pos + 1);
+            if (section == NULL)
+                goto clean;
             
-            ini_line_trim(&_key);
-            ini_line_trim(&_value);
-            
-            *key = _key;
+            ini_map_put(state->ini, section_name, section);
+        }
 
-            if (*(*value = _value) == '\0') {
-                free(_value);
-                *value = NULL;
-            }
-            else
-                sscanf(_value, "\"%[^\"]\"", *value);
-        }
-        else {
-            *key = strdup(line);
-            *value = NULL;
-        }
+        state->cur_section = section;
+
+clean:
+        free(section_name);
     }
 }
 
-static ini_t ini_parse(struct ini_io *io)
+/**
+ * The ini_parse_line function parses one line from the I/O stream and
+ * updates the parse state.
+*/
+static void ini_parse_line(struct ini_parse_state *state, const char *line)
 {
-    char *line, *key, *value;
-    struct ini_parse_state state = {0};
+    size_t pos = 0;
+    char *value, *unquoted_value;
+    char *key;
 
-    if (io == NULL)
-        return NULL;
+    if (line != NULL && *line != '\0') {
+        pos = strcspn(line, INI_KEY_VALUE_SEPARATORS);
 
-    state.ini = ini_new();
-    state.cur_section = ini_map_new(free);
+        if (pos != strlen(line)) {
+            key = ini_strtrim(ini_strndup(line, pos));
+            value = ini_strtrim(ini_strdup(line + pos + 1));
+            unquoted_value = ini_strdup(value);
 
-    ini_map_put(state.ini, INI_DEFAULT_SECTION_NAME, state.cur_section);
+            if (key == NULL || value == NULL || unquoted_value == NULL)
+                return;
+
+            if (*unquoted_value != '\0') {
+                sscanf(value, "\"%[^\"]\"", unquoted_value);
+                ini_map_put(state->cur_section, key, unquoted_value);
+            }
+        }
+        else
+            ini_parse_line_section(state, line);
+    }
+}
+
+/**
+ * The ini_parse function parses the I/O stream and creates an ini_t
+ * structure with configuration data.
+ * 
+ * The following fields of the I/O structure must not be NULL:
+ * - raw 
+ * - mode (should be INI_IO_MODE_READ)
+ * - getc
+ * - eof 
+*/
+static ini_t ini_parse(struct ini_io *io, struct ini_parse_state *state)
+{
+    char *line;
+    size_t comment_pos;
+
+    if (io == NULL && io->mode == INI_IO_MODE_READ)
+        goto ret;
+
+    state->ini = ini_new();
+    state->cur_section = ini_map_new(free);
+
+    /* Add a DEFAULT section */
+    ini_map_put(state->ini, INI_DEFAULT_SECTION_NAME, state->cur_section);
 
     while (!io->eof(io)) {
         line = ini_io_read_line(io);
 
-        ini_line_unquote(&line);
-        ini_line_remove_comment(line);
-        ini_line_trim(&line);
+        if (line != NULL && *line != '\0') {
+            /* Remove a comment */
+            comment_pos = strcspn(line, INI_COMMENT_SYMBOLS);
+            line[comment_pos] = '\0';
 
-        if (line != NULL) {
-            if (ini_parse_line_section(&state, line)) {
-                free(line);
-                continue;
-            }
-
-            ini_line_split(line, &key, &value);
-
-            if (*key)
-                ini_map_put(state.cur_section, key, (void*) value);
-            else
-                free(value);
-
-            free(key);
+            /* Trim & parse */
+            ini_strtrim(line);
+            ini_parse_line(state, line);
         }
 
         free(line);
     }
 
-    return state.ini;
+ret:
+    return state->ini;
 }
 
+/**
+ * Writes section properties to the I/O stream.
+*/
+static size_t ini_store_section(struct ini_io *io, struct ini_map *sec)
+{
+    struct ini_map_entry **entries, *cur;
+    size_t size = 0;
+    int i;
+
+    if (sec != NULL && io != NULL && io->mode == INI_IO_MODE_WRITE) {
+        size = ini_map_enumerate(sec, &entries);
+
+        for (i = 0; i < size; ++i) {
+            cur = entries[i];
+
+            if (cur->key != NULL) {
+                ini_io_write(io, cur->key);
+                io->putc(io, ' ');
+                io->putc(io, INI_KEY_VALUE_SEPARATORS[0]);
+                io->putc(io, ' ');
+                ini_io_write(io, (const char*) cur->value);
+                io->putc(io, '\n');
+            }
+        }
+
+        free(entries);
+    }
+
+    return size;
+}
+
+/**
+ * Saves the ini_t structure to the specified I/O stream.
+ * 
+ * The following fields of the I/O structure must not be NULL:
+ * - raw 
+ * - mode (should be INI_IO_MODE_WRITE)
+ * - putc 
+*/
+static void ini_store(ini_t ini, struct ini_io *io)
+{
+    struct ini_map_entry **entries, *cur;
+    struct ini_map *default_section;
+    size_t size;
+    int i;
+
+    if (ini != NULL && io != NULL && io->mode == INI_IO_MODE_WRITE) {
+        size = ini_map_enumerate(ini, &entries);
+
+        default_section = (struct ini_map*)
+            ini_map_get(ini, INI_DEFAULT_SECTION_NAME);
+
+        if (default_section != NULL)
+            ini_store_section(io, default_section);
+
+        for (i = 0; i < size; ++i) {
+            cur = entries[i];
+
+            if (strcmp(cur->key, INI_DEFAULT_SECTION_NAME) == 0)
+                continue;
+
+            io->putc(io, '[');
+            ini_io_write(io, cur->key);
+            ini_io_write(io, "]\n");
+            ini_store_section(io, (struct ini_map*) cur->value);
+        }
+
+        free(entries);
+    }
+}
+
+/**
+ * Creates an ini structure from data read from a string.
+ * 
+ * WARNING: The string must end with `\0`, otherwise it may lead to
+ * undefined behavior.
+*/
 static ini_t ini_parse_from_str(const char *str)
 {
+    struct ini_parse_state state = {0};
     struct ini_io io = {0};
 
     io.eof = ini_io_string_eof;
     io.getc = ini_io_string_getc;
-    io.peek = INI_IO_PEEK;
     io.raw = (void*) str;
-    io.type = INI_IO_READ;
+    io.mode = INI_IO_MODE_READ;
 
-    return ini_parse(&io);
+    return ini_parse(&io, &state);
 }
 
+/**
+ * Creates an ini structure from data read from an open file stream.
+*/
 static ini_t ini_parse_from_file(FILE *fp)
 {
+    struct ini_parse_state state = {0};
     struct ini_io io = {0};
 
     io.eof = ini_io_file_eof;
     io.getc = ini_io_file_getc;
-    io.peek = INI_IO_PEEK;
     io.raw = (void*) fp;
-    io.type = INI_IO_READ;
+    io.mode = INI_IO_MODE_READ;
 
-    return ini_parse(&io);
+    return ini_parse(&io, &state);
 }
 
+/**
+ * Creates an ini structure from data read from a file at the given
+ * path.
+*/
 static ini_t ini_parse_from_path(const char *path)
 {
     ini_t tmp = NULL;
@@ -667,96 +816,23 @@ static ini_t ini_parse_from_path(const char *path)
     return tmp;
 }
 
-static size_t ini_store_section(struct ini_map *sec, struct ini_io *io)
-{
-    struct ini_map_entry **entries, *cur;
-    size_t size, tmp_size = 0;
-    const char *_value;
-    char *tmp;
-    int i;
-
-    if (sec != NULL && io != NULL && io->type == INI_IO_WRITE) {
-        size = ini_map_enumerate(sec, &entries);
-
-        for (i = 0; i < size; ++i) {
-            cur = entries[i];
-
-            if (!*cur->key) continue; 
-
-            _value = (const char *) cur->value;
-            _value = (_value) ? _value : "";
-
-            tmp_size = strlen(cur->key) + 4 + strlen(_value);
-            tmp = ini_strndup("", tmp_size);
-
-            sprintf(tmp, "%s = %s", cur->key, _value);
-
-            ini_io_write_line(io, tmp);
-            
-            free(tmp);
-        }
-
-        free(entries);
-    }
-
-    return size;
-}
-
-static void ini_store(ini_t ini, struct ini_io *io)
-{
-    struct ini_map_entry **entries, *cur;
-    struct ini_map *_value;
-    size_t size;
-    char *tmp;
-    int i;
-
-    if (ini != NULL && io != NULL && io->type == INI_IO_WRITE) {
-        size = ini_map_enumerate(ini, &entries);
-
-        _value = (struct ini_map*) ini_map_get(ini,
-                    INI_DEFAULT_SECTION_NAME);
-
-        if (_value != NULL) {
-            if (ini_store_section(_value, io))
-                io->putc(io, '\n');
-        }
-
-        for (i = 0; i < size; ++i) {
-            cur = entries[i];
-
-            _value = (struct ini_map*) cur->value;
-
-            if (strcmp(cur->key, INI_DEFAULT_SECTION_NAME) == 0)
-                continue;
-
-            tmp = ini_strndup("", strlen(cur->key) + 3);
-
-            sprintf(tmp, "[%s]", cur->key);
-
-            ini_io_write_line(io, tmp);
-            ini_store_section(_value, io);
-
-            if (i <= size - 2) io->putc(io, '\n');
-            
-            free(tmp);
-        }
-
-        free(entries);
-    }
-}
-
+/**
+ * Saves the contents of the ini structure to an open file stream.
+*/
 static void ini_store_to_file(ini_t ini, FILE *fp)
 {
     struct ini_io io = {0};
-    
-    io.peek = INI_IO_PEEK;
     io.putc = ini_io_file_putc;
     io.raw = (void*) fp;
-    io.type = INI_IO_WRITE;
+    io.mode = INI_IO_MODE_WRITE;
     
     ini_store(ini, &io);
 }
 
+/**
+ * Saves the contents of the ini structure to a file at the specified
+ * path.
+*/
 static void ini_store_to_path(ini_t ini, const char *path)
 {
     FILE *fp;

@@ -31,19 +31,15 @@ int main(void)
 
     if (ini != NULL) {
         build_folder = ini_get(ini, NULL, "build folder", "");
+        
+        game_info_from_ini(&info, ini);
 
         puts("----------------------------------");
         printf("build_folder: %s\n", build_folder);
         puts("----------------------------------");
-
-        game_info_from_ini(&info, ini);
-
         printf("   name:\t%s\n", info.name);
         printf("   year:\t%s\n", info.year);
         printf("version:\t%s\n", info.version);
-
-        puts("----------------------------------");
-        ini_store_to_file(ini, stdout);
         puts("----------------------------------");
 
         ini_free(ini);
