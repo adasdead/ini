@@ -35,8 +35,8 @@ int main(void)
     ini_t ini = ini_parse_from_path("example.ini");
 
     if (ini != NULL) {
-		ini_set(ini, "account", "user", "example");
-    	ini_set(ini, "account", "email", "example@example.com");
+        ini_set(ini, "account", "user", "example");
+        ini_set(ini, "account", "email", "example@example.com");
         ini_store_to_file(ini, stdout);
         ini_free(ini);
     }
