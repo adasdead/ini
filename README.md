@@ -1,16 +1,31 @@
-# ini
-Header-only C/C++ ini parser 
+<pre align="center">
+ ____  ____   ____ 
+|    ||  _ \ |    |
+ |  | |  |  | |  | 
+|____||__|__||____|
+</pre>
 
-# Installation
-1. Put ini.h in your project files
-2. Include the "ini.h" file in your code:
+<div align="center">
+
+![](https://img.shields.io/badge/made%20by-adasdead-lightgray.svg?style=flat-square)
+![](https://img.shields.io/github/languages/top/adasdead/ini.svg?color=lightgray&style=flat-square)
+
+</div>
+
+`ini.h` is a header-only `C/C++` library for working with INI files. It allows you to read, write and modify INI files using a simple and user friendly interface.
+
+## Requirements
+- `C/C++` compiler supporting `C99/C++11` or higher
+- `ini.h` has no external dependencies
+
+## Installation
+To use the library, just copy the `ini.h` file to your project and include it using the #include directive:
 ```c
 #include "ini.h"
 ```
-3. Enjoy :D
 
-# Example
-## example.ini
+## Usage
+### example.ini
 ```ini
 ; https://en.wikipedia.org/wiki/INI_file
 ; last modified 1 April 2001 by John Doe
@@ -24,7 +39,7 @@ server = 192.0.2.62
 port = 143
 file = "payroll.dat"
 ```
-## main.c
+### main.c
 ```c
 #include <stdio.h>
 
@@ -44,7 +59,7 @@ int main(void)
     return 0;
 }
 ```
-## output:
+### stdout:
 ```ini
 [owner]
 name = John Doe
@@ -57,3 +72,6 @@ file = payroll.dat
 port = 143
 server = 192.0.2.62
 ```
+
+## License
+The project is distributed under the MIT license. See [LICENSE](LICENSE) file for details.
