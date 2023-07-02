@@ -544,7 +544,7 @@ static char *ini_io_read_line(struct ini_io *io)
 
     if (io != NULL && io->mode == INI_IO_MODE_READ) {
         while (!io->eof(io)) {
-            if (io->getc(io) == '\n' || io->peek == EOF)
+            if (io->getc(io) == '\n')
                 break;
 
             if ((size + 1) >= capacity) {
