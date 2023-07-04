@@ -140,10 +140,12 @@ static char *ini_strndup(const char *str, size_t size)
 static char *ini_strtrim(char *str)
 {
     size_t last, first;
-    size_t size = strlen(str);
+    size_t size;
 
     if (str == NULL || *str == '\0')
         return str;
+    
+    size = strlen(str);
 
     /* Finding the first non-whitespace character */
     for (first = 0; isspace(str[first]); ++first);
@@ -280,15 +282,22 @@ static void ini_map_expand(struct ini_map *map)
  * Associates the specified value with the specified key in this map.
  * Does nothing if `map` or `key` is NULL. Returns true if everything
  * went well.
+ * 
+ * NOTE: Creates a copy of the `key` string inside. If you have
+ * allocated memory for `key`, don't forget to free it.
 */
 static bool ini_map_put(struct ini_map *map, const char *key, void *value)
 {
-    unsigned int hash = ini_djb2_hash(key);
-    size_t index = ini_map_index(hash, map->capacity);
-    struct ini_map_entry *entry = map->values[index];
+    unsigned int hash;
+    struct ini_map_entry *entry;
+    size_t index;
 
     if (map == NULL && key == NULL && *key == '\0')
         return false;
+
+    hash = ini_djb2_hash(key);
+    index = ini_map_index(hash, map->capacity);
+    entry = map->values[index];
 
     while (entry != NULL) {
         if (ini_map_keys_equal(hash, key, entry->hash, entry->key)) {
@@ -643,6 +652,10 @@ static void ini_parse_line(struct ini_parse_state *state, const char *line)
                 sscanf(value, "\"%[^\"]\"", unquoted_value);
                 ini_map_put(state->cur_section, key, unquoted_value);
             }
+            else
+                free(unquoted_value);
+
+            free(value);
         }
         else
             ini_parse_line_section(state, line);

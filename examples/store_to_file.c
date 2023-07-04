@@ -12,5 +12,7 @@ int main(void)
     ini_set(ini, "account", "email", "example@example.com");
 
     ini_store_to_path(ini, "result.ini");
+
+    ini_free(ini);
     return 0;
 }
