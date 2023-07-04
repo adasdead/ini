@@ -428,7 +428,7 @@ ini_get(ini_t ini, const char *section, const char *key, const char *def)
 {
     struct ini_map *_section;
     const char *section_name = section ? section : INI_DEFAULT_SECTION_NAME;
-    const char *value;
+    const char *value = NULL;
 
     if (ini != NULL && key != NULL && ini->size > 0) {
         _section = (struct ini_map*) ini_map_get(ini, section_name);
