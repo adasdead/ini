@@ -656,6 +656,7 @@ static void ini_parse_line(struct ini_parse_state *state, const char *line)
                 free(unquoted_value);
 
             free(value);
+            free(key);
         }
         else
             ini_parse_line_section(state, line);
